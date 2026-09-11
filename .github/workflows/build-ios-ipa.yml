@@ -40,8 +40,17 @@ jobs:
 
           p = Path("thirdparty/nativefiledialog-extended/CMakeLists.txt")
           s = p.read_text()
-          s = s.replace("elseif(APPLE)\n  set(nfd_PLATFORM PLATFORM_MACOS)",
-                        "elseif(APPLE AND NOT IOS)\n  set(nfd_PLATFORM PLATFORM_MACOS)")
+
+          s = s.replace(
+              "elseif(APPLE)\n  set(nfd_PLATFORM PLATFORM_MACOS)",
+              "elseif(APPLE AND NOT IOS)\n  set(nfd_PLATFORM PLATFORM_MACOS)"
+          )
+
+          s = s.replace(
+              "if(nfd_PLATFORM STREQUAL PLATFORM_MACOS)",
+              "if(nfd_PLATFORM STREQUAL PLATFORM_MACOS AND NOT IOS)"
+          )
+
           p.write_text(s)
           PY
 
