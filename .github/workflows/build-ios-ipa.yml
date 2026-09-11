@@ -33,6 +33,18 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive
 
+      - name: Patch nativefiledialog for iOS
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("thirdparty/nativefiledialog-extended/CMakeLists.txt")
+          s = p.read_text()
+          s = s.replace("elseif(APPLE)\n  set(nfd_PLATFORM PLATFORM_MACOS)",
+                        "elseif(APPLE AND NOT IOS)\n  set(nfd_PLATFORM PLATFORM_MACOS)")
+          p.write_text(s)
+          PY
+
       - name: Install build tools
         run: |
           brew install ninja
