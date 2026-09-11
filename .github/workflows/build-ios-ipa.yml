@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           if [ ! -x thirdparty/vcpkg/vcpkg ]; then
             rm -rf thirdparty/vcpkg
-            git clone --depth=1 https://github.com/microsoft/vcpkg.git thirdparty/vcpkg
+            git clone https://github.com/microsoft/vcpkg.git thirdparty/vcpkg
           fi
           ./thirdparty/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
