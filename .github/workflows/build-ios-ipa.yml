@@ -1,0 +1,133 @@
+name: Build iOS IPA (Metal)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS IPA
+    # Standard macOS runners are free/unlimited for public repositories.
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      IOS_PRESET: ios-device-release
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The ZIP you downloaded does not contain the iOS/Metal PR changes.
+      # Use the current upstream iOS branch as the source tree for this build.
+      - name: Apply upstream iOS/Metal branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 https://github.com/Markos-Th09/UnleashedRecomp.git ios
+          git checkout FETCH_HEAD
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Install build tools
+        run: |
+          brew install ninja
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          cmake --version
+          ninja --version
+
+      - name: Prepare vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -x thirdparty/vcpkg/vcpkg ]; then
+            rm -rf thirdparty/vcpkg
+            git clone --depth=1 https://github.com/microsoft/vcpkg.git thirdparty/vcpkg
+          fi
+          ./thirdparty/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      # Keep game files out of the public repository.
+      # Create a PRIVATE GitHub repository containing only your own legally
+      # obtained default.xex, default.xexp and shader.ar, then add:
+      #   ASSET_REPO       = owner/private-game-assets
+      #   ASSET_REPO_TOKEN = a fine-grained token with read access to that repo.
+      - name: Download private game build inputs
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.ASSET_REPO }}
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          path: private-assets
+
+      - name: Prepare game build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p UnleashedRecompLib/private
+          cp private-assets/default.xex UnleashedRecompLib/private/
+          cp private-assets/default.xexp UnleashedRecompLib/private/
+          cp private-assets/shader.ar UnleashedRecompLib/private/
+
+      - name: Configure iOS Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake . --preset "$IOS_PRESET" \
+            -DSDL2MIXER_VORBIS=VORBISFILE \
+            -DUNLEASHED_RECOMP_METAL=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "./out/build/$IOS_PRESET" \
+            --target UnleashedRecomp \
+            --parallel "$(sysctl -n hw.ncpu)"
+
+      - name: Locate app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find "./out/build/$IOS_PRESET" -type d -name '*.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "No .app bundle was produced."
+            find "./out/build/$IOS_PRESET" -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "Built: $APP"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" || true
+          file "$APP/"* 2>/dev/null || true
+
+      - name: Ad-hoc sign app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This is deliberately ad-hoc. Sideloadly/AltStore can re-sign the IPA
+          # with the user's own Apple account. No Apple certificate is stored here.
+          codesign --deep --force --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" "Payload/$(basename "$APP")"
+          /usr/bin/zip -qry Unleashed-iOS-Metal.ipa Payload
+          unzip -l Unleashed-iOS-Metal.ipa | head -40
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unleashed-iOS-Metal
+          path: Unleashed-iOS-Metal.ipa
+          if-no-files-found: error
+          retention-days: 7
